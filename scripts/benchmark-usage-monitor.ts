@@ -110,17 +110,22 @@ async function measureInterleaved(
   const baselineDurations: number[] = [];
   const measuredDurations: number[] = [];
   const added: number[] = [];
+  const measure = async (handler: () => Promise<unknown>): Promise<number> => {
+    const started = performance.now();
+    await handler();
+    return performance.now() - started;
+  };
   for (let index = 0; index < calls; index += 1) {
-    const baselineStarted = performance.now();
-    await baselineHandler();
-    const baselineDuration = performance.now() - baselineStarted;
-    baselineDurations.push(baselineDuration);
-
-    const measuredStarted = performance.now();
-    await measuredHandler();
-    const measuredDuration = performance.now() - measuredStarted;
+    // Alternate the pair order so CPU warm-up and scheduler drift cannot
+    // systematically penalize the monitored half of every sample.
+    const baselineDuration = index % 2 === 0
+      ? await measure(baselineHandler)
+      : undefined;
+    const measuredDuration = await measure(measuredHandler);
+    const pairedBaselineDuration = baselineDuration ?? await measure(baselineHandler);
+    baselineDurations.push(pairedBaselineDuration);
     measuredDurations.push(measuredDuration);
-    added.push(Math.max(0, measuredDuration - baselineDuration));
+    added.push(Math.max(0, measuredDuration - pairedBaselineDuration));
   }
   return {
     baseline: { p95: percentile(baselineDurations, 0.95), values: baselineDurations },
