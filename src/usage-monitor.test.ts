@@ -291,6 +291,30 @@ test("telemetry sink receives only low-cardinality MCP metadata and excludes bag
   }
 });
 
+test("telemetry keeps a thrown handler response UNKNOWN instead of overstating token coverage", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "devspace-usage-telemetry-error-test-"));
+  const observations: Array<{ attributes: Record<string, unknown> }> = [];
+  const monitor = createUsageMonitor(testConfig(directory), {
+    encode: async () => 1,
+    identityKey: Buffer.from("test-key"),
+    telemetrySink: { emit: (observation) => observations.push(observation) },
+  });
+  try {
+    const wrapped = monitor.wrapHandler("read", async () => {
+      throw new Error("PRIVATE-HANDLER-ERROR");
+    });
+    await assert.rejects(wrapped({ path: "PRIVATE-PATH" }, { _meta: {} }), /PRIVATE-HANDLER-ERROR/);
+    await monitor.whenIdle();
+    assert.equal(observations.length, 1);
+    assert.equal(observations[0]?.attributes["devspace.usage.token_coverage"], "UNKNOWN_RESPONSE");
+    assert.equal(observations[0]?.attributes["error.type"], "tool_error");
+    assert.doesNotMatch(JSON.stringify(observations), /PRIVATE-(PATH|HANDLER-ERROR)/);
+  } finally {
+    await monitor.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test("monitor close remains bounded when a tokenizer side never settles", async () => {
   const directory = await mkdtemp(join(tmpdir(), "devspace-usage-bounded-close-test-"));
   let releaseTokenizer!: () => void;

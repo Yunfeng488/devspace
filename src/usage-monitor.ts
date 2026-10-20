@@ -255,12 +255,16 @@ export function createUsageMonitor(
             noteWrite();
             const remaining = Number(Boolean(request)) + Number(Boolean(input.response));
             if (remaining > 0 && dependencies.telemetrySink) {
+              const statuses = [
+                ...(!request ? [requestMeasurementStatus ?? "UNKNOWN"] : []),
+                ...(!input.response ? [input.responseMeasurementStatus ?? "UNKNOWN_RESPONSE"] : []),
+              ];
               pendingTelemetry.set(eventId, {
                 tool,
                 outcome: input.outcome,
                 durationMs: input.durationMs,
                 remaining,
-                statuses: [],
+                statuses,
                 ...(traceContext ? { traceContext } : {}),
               });
             } else if (dependencies.telemetrySink) {

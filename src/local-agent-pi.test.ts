@@ -14,10 +14,7 @@ import type { LocalAgentRuntimeContext } from "./local-agent-runtime.js";
 class FakePiSession implements PiSessionLike {
   readonly sessionId = "pi_session_1";
   readonly messages: any[] = [];
-  readonly modelRuntime = {
-    getModel: () => ({ id: "model" }),
-    getModels: () => [{ id: "model" }],
-  } as unknown as PiSessionLike["modelRuntime"];
+  readonly modelRegistry = { find: () => ({ id: "model" }) } as unknown as PiSessionLike["modelRegistry"];
   private readonly listeners = new Set<AgentSessionEventListener>();
   disposeCount = 0;
   model?: unknown;
@@ -110,7 +107,7 @@ assert.equal(sessions[0]?.effort, "high");
 assert.deepEqual(sessionIds, ["pi_session_1"]);
 assert.deepEqual(piToolsForWriteMode("allowed"), ["read", "grep", "find", "ls", "edit", "write", "bash"]);
 assert.ok(
-  createPiSandboxConfig().filesystem.denyRead.some((entry) => basename(typeof entry === "string" ? entry : entry.path) === ".ssh"),
+  createPiSandboxConfig().filesystem.denyRead.some((path) => basename(path) === ".ssh"),
   "sandbox config includes the protected-home read rule; enforcement is covered by local-agent-pi-sandbox.test.ts",
 );
 assert.deepEqual(sessions[0]?.activeTools, ["read", "grep", "find", "ls"]);
@@ -143,9 +140,7 @@ assert.deepEqual(sessions[1]?.activeTools, ["read", "grep", "find", "ls", "edit"
 await pool.close();
 
 const missingModelSession = new FakePiSession();
-Object.defineProperty(missingModelSession, "modelRuntime", {
-  value: { getModel: () => undefined, getModels: () => [] },
-});
+Object.defineProperty(missingModelSession, "modelRegistry", { value: { find: () => undefined } });
 const missingModelDriver = new PiLocalAgentDriver(async () => missingModelSession);
 const missingModelRuntime = await missingModelDriver.createRuntime(context);
 assert.equal(missingModelRuntime.isOk(), true);
