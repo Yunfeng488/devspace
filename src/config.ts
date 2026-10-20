@@ -1,5 +1,5 @@
 import { homedir } from "node:os";
-import { join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { expandHomePath } from "./roots.js";
 import type { LoggingConfig, LogFormat, LogLevel } from "./logger.js";
 import type { OAuthConfig } from "./oauth-provider.js";
@@ -8,6 +8,18 @@ import { resolveSubagentsConfig, type SubagentsConfig } from "./local-agent-conf
 
 export type ToolMode = "minimal" | "full" | "codex";
 export type WidgetMode = "off" | "changes" | "full";
+export interface UsageConfig {
+  enabled: boolean;
+  stateDir: string;
+  pythonExecutable: string;
+  workerPath: string;
+  workerSha256: string;
+  requestTimeoutMs: number;
+  shutdownTimeoutMs: number;
+  retentionDays: number;
+  maxEventBytes: number;
+  maxQueueBytes: number;
+}
 const DEFAULT_OAUTH_ACCESS_TOKEN_TTL_SECONDS = 60 * 60;
 const DEFAULT_OAUTH_REFRESH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
 const DEFAULT_ARTIFACT_MAX_FILE_BYTES = 100 * 1024 * 1024;
@@ -32,6 +44,7 @@ export interface ServerConfig {
   subagents: SubagentsConfig;
   agentDir: string;
   logging: LoggingConfig;
+  usage: UsageConfig;
 }
 
 function parsePort(value: string | number | undefined): number {
@@ -223,6 +236,17 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     new URL(publicBaseUrl).hostname,
     ...(files.config.allowedHosts ?? []),
   ];
+  const stateDir = resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir()));
+  const usageDirectory = env.DEVSPACE_USAGE_DIR?.trim();
+  const usageWorker = env.DEVSPACE_USAGE_WORKER?.trim() ?? "";
+  const usageWorkerSha256 = env.DEVSPACE_USAGE_WORKER_SHA256?.trim().toLowerCase() ?? "";
+  if (usageDirectory) {
+    if (!usageWorker) throw new Error("DEVSPACE_USAGE_WORKER is required when usage monitoring is enabled");
+    if (!isAbsolute(usageWorker)) throw new Error("DEVSPACE_USAGE_WORKER must be an absolute path");
+    if (!/^[0-9a-f]{64}$/.test(usageWorkerSha256)) {
+      throw new Error("DEVSPACE_USAGE_WORKER_SHA256 must be a SHA-256 hex digest");
+    }
+  }
 
   return {
     host,
@@ -233,7 +257,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     publicBaseUrl,
     toolMode: parseToolMode(env),
     widgets: parseWidgetMode(env.DEVSPACE_WIDGETS),
-    stateDir: resolve(expandHomePath(env.DEVSPACE_STATE_DIR ?? files.config.stateDir ?? defaultStateDir())),
+    stateDir,
     worktreeRoot: resolve(expandHomePath(env.DEVSPACE_WORKTREE_ROOT ?? files.config.worktreeRoot ?? defaultWorktreeRoot())),
     artifactsEnabled:
       env.DEVSPACE_ARTIFACTS === undefined
@@ -251,6 +275,41 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): ServerConfig {
     subagents: resolveSubagentsConfig(files.config.subagents, env),
     agentDir: resolve(expandHomePath(env.DEVSPACE_AGENT_DIR ?? files.config.agentDir ?? defaultAgentDir())),
     logging: parseLoggingConfig(env),
+    usage: {
+      enabled: Boolean(usageDirectory),
+      stateDir: resolve(expandHomePath(usageDirectory || join(stateDir, "usage"))),
+      pythonExecutable: env.DEVSPACE_USAGE_PYTHON?.trim() || "python",
+      workerPath: usageWorker,
+      workerSha256: usageWorkerSha256,
+      requestTimeoutMs: parsePositiveInteger(
+        env.DEVSPACE_USAGE_REQUEST_TIMEOUT_MS,
+        10_000,
+        "DEVSPACE_USAGE_REQUEST_TIMEOUT_MS",
+        60_000,
+      ),
+      shutdownTimeoutMs: parsePositiveInteger(
+        env.DEVSPACE_USAGE_SHUTDOWN_TIMEOUT_MS,
+        5_000,
+        "DEVSPACE_USAGE_SHUTDOWN_TIMEOUT_MS",
+        30_000,
+      ),
+      retentionDays: parsePositiveInteger(
+        env.DEVSPACE_USAGE_RETENTION_DAYS,
+        90,
+        "DEVSPACE_USAGE_RETENTION_DAYS",
+        3650,
+      ),
+      maxEventBytes: parsePositiveInteger(
+        env.DEVSPACE_USAGE_MAX_EVENT_BYTES,
+        16 * 1024 * 1024,
+        "DEVSPACE_USAGE_MAX_EVENT_BYTES",
+      ),
+      maxQueueBytes: parsePositiveInteger(
+        env.DEVSPACE_USAGE_MAX_QUEUE_BYTES,
+        64 * 1024 * 1024,
+        "DEVSPACE_USAGE_MAX_QUEUE_BYTES",
+      ),
+    },
   };
 }
 

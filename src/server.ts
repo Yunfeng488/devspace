@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomUUID, timingSafeEqual } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { access, realpath } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -58,6 +58,7 @@ import { formatAgentsPath, WorkspaceRegistry } from "./workspaces.js";
 import {
   getLocalAgentProviderAvailabilitySnapshot,
 } from "./local-agent-availability.js";
+import { createUsageMonitor, instrumentMcpServer } from "./usage-monitor.js";
 import {
   buildLocalAgentCatalog,
   buildLocalAgentProviderStatuses,
@@ -95,6 +96,7 @@ interface RunningServer {
   app: ReturnType<typeof createMcpExpressApp>;
   config: ServerConfig;
   localAgentProviders: LocalAgentProviderStatus[];
+  usageMonitor?: ReturnType<typeof createUsageMonitor>;
   close(): Promise<void>;
 }
 
@@ -321,6 +323,14 @@ function requestLogFields(req: Request, config: ServerConfig): Record<string, un
     referer: req.header("referer"),
     contentLength: req.header("content-length"),
   };
+}
+
+function secureTokenEqual(actual: string | undefined, expected: string): boolean {
+  if (!actual) return false;
+  const actualBytes = Buffer.from(actual, "utf8");
+  const expectedBytes = Buffer.from(expected, "utf8");
+  return actualBytes.byteLength === expectedBytes.byteLength
+    && timingSafeEqual(actualBytes, expectedBytes);
 }
 
 function logToolCall(config: ServerConfig, fields: ToolLogFields): void {
@@ -711,6 +721,7 @@ export function createMcpServer(
   processSessions: ProcessSessionManager,
   resolveLocalAgentProviders: () => LocalAgentProviderStatus[],
   incomingArtifactAdapters: readonly IncomingArtifactAdapter[],
+  usageMonitor?: ReturnType<typeof createUsageMonitor>,
 ): McpServer {
   const server = new McpServer(
     {
@@ -724,6 +735,7 @@ export function createMcpServer(
       instructions: serverInstructions(config),
     },
   );
+  instrumentMcpServer(server, usageMonitor);
 
   registerAppResource(
     server,
@@ -1679,6 +1691,28 @@ export function createServer(
 ): RunningServer {
   const incomingArtifactAdapters = options.incomingArtifactAdapters
     ?? [createOpenAIIncomingArtifactAdapter()];
+  let usageMonitor: ReturnType<typeof createUsageMonitor> | undefined;
+  let usageRuntimeFallback = {
+    writer_state: config.usage.enabled ? "INITIALIZING" : "DISABLED",
+    boot_id: null,
+    last_successful_write_at_ms: null,
+    queue: { queued_bytes: 0, queued_items: 0, active: false },
+    failure_counts: { storage: 0, tokenizer: 0, dropped: 0, incomplete: 0 },
+  };
+  if (config.usage.enabled) {
+    try {
+      usageMonitor = createUsageMonitor(config.usage);
+    } catch {
+      usageRuntimeFallback = {
+        ...usageRuntimeFallback,
+        writer_state: "DEGRADED_INIT",
+        failure_counts: { ...usageRuntimeFallback.failure_counts, storage: 1 },
+      };
+      logEvent(config.logging, "warn", "usage_monitor_unavailable", {
+        reason: "initialization_failed",
+      });
+    }
+  }
   const allowedHosts = config.allowedHosts.includes("*")
     ? undefined
     : Array.from(new Set([config.host, ...config.allowedHosts]));
@@ -1796,6 +1830,17 @@ export function createServer(
     res.json({ ok: true, name: "devspace" });
   });
 
+  app.get("/usage-healthz", (req, res) => {
+    const expected = usageMonitor?.healthToken;
+    if (!expected || !secureTokenEqual(req.header("authorization"), `Bearer ${expected}`)) {
+      res.setHeader("WWW-Authenticate", "Bearer");
+      res.status(401).json({ error: "unauthorized" });
+      return;
+    }
+    res.setHeader("Cache-Control", "no-store");
+    res.json({ usage: usageMonitor?.runtimeHealth() ?? usageRuntimeFallback });
+  });
+
   app.all("/mcp", async (req, res) => {
     const requestId = res.locals.requestId as string | undefined;
     const sessionId = req.header("mcp-session-id");
@@ -1868,6 +1913,7 @@ export function createServer(
           processSessions,
           resolveLocalAgentProviders,
           incomingArtifactAdapters,
+          usageMonitor,
         );
         await server.connect(transport);
       } else {
@@ -1892,12 +1938,14 @@ export function createServer(
     app,
     config,
     localAgentProviders,
+    usageMonitor,
     close: () => {
       closePromise ??= (async () => {
         clearInterval(sessionCleanupTimer);
         const results = await transports.closeAll();
         logSessionCloseResults("server_shutdown", results);
         processSessions.shutdown();
+        await usageMonitor?.close();
         oauthProvider.close();
         workspaceStore.close?.();
       })();

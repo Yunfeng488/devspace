@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>W 用量 · DevSpace</title>
+  <style>
+    :root {
+      --bg:#0b0d10;--surface:#12161b;--surface-2:#171c22;--line:#29313a;
+      --text:#f1f4f6;--muted:#9aa5af;--accent:#76e4b8;--blue:#67b7ff;
+      --warn:#ffd166;--danger:#ff817b;--radius:12px;
+      font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    }
+    *{box-sizing:border-box} html,body{min-width:320px;margin:0;background:var(--bg);color:var(--text)}
+    button,input{font:inherit} button,a,input,summary{outline-offset:3px}:focus-visible{outline:2px solid var(--blue)}
+    .shell{width:min(1440px,100%);margin:auto;padding:24px clamp(16px,3vw,42px) 56px}
+    .topbar,.section-head,.controls,.coverage-strip{display:flex;align-items:center;justify-content:space-between;gap:14px}
+    .eyebrow{color:var(--accent);font:700 12px/1.2 ui-monospace,Consolas,monospace;letter-spacing:.12em;text-transform:uppercase}
+    h1{margin:6px 0 5px;font-size:clamp(28px,4vw,42px);line-height:1;letter-spacing:-.04em}
+    h2{margin:0;font-size:16px}.lede,.hint,.meta,.sub{color:var(--muted)}
+    .actions,.range-group{display:flex;gap:7px;flex-wrap:wrap}
+    .status,.button,.range-button{min-height:38px;border:1px solid var(--line);border-radius:9px;background:var(--surface);color:var(--text);padding:8px 12px}
+    .status{display:inline-flex;align-items:center;font-weight:700;white-space:nowrap}
+    .status[data-state="AVAILABLE"]{color:var(--accent)}.status[data-state="PARTIAL"]{color:var(--warn)}.status[data-state="UNKNOWN"]{color:var(--muted)}
+    button{cursor:pointer}.range-button{background:transparent;color:var(--muted)}
+    .range-button[aria-pressed="true"]{border-color:var(--accent);background:#123026;color:var(--accent)}
+    .notice{margin:20px 0;padding:13px 15px;border:1px solid #3a464f;border-left:4px solid var(--warn);border-radius:9px;background:#171a1c;line-height:1.55}
+    .notice strong{color:var(--warn)}.controls{align-items:flex-start;margin-bottom:14px;flex-wrap:wrap}.meta{font-size:12px}
+    details{border-top:1px solid var(--line)} summary{padding:13px 0;cursor:pointer;font-weight:650}
+    #custom-details{border:0}.custom-form{display:flex;align-items:end;gap:8px;flex-wrap:wrap;padding:5px 0 12px}
+    label{display:grid;gap:4px;color:var(--muted);font-size:12px}input[type="date"]{min-height:38px;border:1px solid var(--line);border-radius:8px;color:var(--text);background:var(--surface);padding:7px 9px}
+    .metrics{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+    .card,.section,.detail-stack{border:1px solid var(--line);border-radius:var(--radius);background:var(--surface)}
+    .card{min-height:120px;padding:15px}.card .label{color:var(--muted);font-size:12px}.card .value{margin-top:17px;font:700 clamp(22px,2.4vw,32px)/1 ui-monospace,Consolas,monospace;letter-spacing:-.035em}.card .sub{margin-top:9px;font-size:11px;line-height:1.45}
+    .token-card{border-color:#245d49;background:#11211b}.token-card .value{color:var(--accent)}
+    .coverage-strip{justify-content:flex-start;flex-wrap:wrap;margin:12px 0;padding:11px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface-2);font-size:12px}
+    .coverage-item{display:flex;gap:7px;align-items:center}.coverage-item strong{font-family:ui-monospace,Consolas,monospace}
+    .grid{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(300px,.65fr);gap:14px}.section{min-width:0;padding:17px}.section-head{align-items:baseline;margin-bottom:12px}
+    .chart{min-height:205px;display:flex;align-items:end;gap:9px;padding-top:12px;overflow-x:auto}.bar-group{flex:1 0 34px;min-width:34px;display:grid;grid-template-rows:150px auto;gap:8px}.bars{display:flex;align-items:end;gap:3px;border-bottom:1px solid var(--line)}.bar{width:50%;min-height:2px;background:var(--accent);border-radius:4px 4px 0 0}.bar.response{background:var(--blue)}.bar-label{overflow:hidden;color:var(--muted);font:10px/1 ui-monospace,Consolas,monospace;text-align:center;text-overflow:ellipsis}
+    .legend{display:flex;gap:12px;color:var(--muted);font-size:12px}.legend span::before{content:"";display:inline-block;width:9px;height:9px;margin-right:5px;border-radius:2px;background:var(--accent)}.legend span:last-child::before{background:var(--blue)}
+    .detail-stack{margin-top:14px;padding:0 17px}.detail-stack details:first-child{border-top:0}.detail-body{padding:0 0 14px}
+    .table-wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;font-size:13px}th,td{padding:10px 9px;border-bottom:1px solid var(--line);text-align:right;white-space:nowrap}th:first-child,td:first-child{text-align:left;padding-left:0}th{color:var(--muted);font-size:11px}td{font-variant-numeric:tabular-nums}tbody tr:last-child td{border-bottom:0}
+    .empty{padding:28px 8px;color:var(--muted);text-align:center}.mono{font-family:ui-monospace,Consolas,monospace}.error{color:var(--danger)}.footer{margin-top:16px;color:var(--muted);font-size:12px;line-height:1.6}
+    #announcer{position:fixed;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+    @media(max-width:1024px){.metrics{grid-template-columns:repeat(2,minmax(0,1fr))}.grid{grid-template-columns:1fr}; table{display:block;overflow-x:auto}}
+    @media(max-width:600px){.shell{padding-top:18px}.topbar,.section-head{align-items:stretch;flex-direction:column}.metrics{grid-template-columns:1fr}.actions{justify-content:space-between}.custom-form label{flex:1 1 130px}.custom-form input{width:100%}}
+    @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important;animation:none!important}}
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header class="topbar">
+      <div><div class="eyebrow">DevSpace / MCP payload telemetry</div><h1>W 用量</h1><p class="lede">W 经由 DevSpace MCP 交换的模型可见载荷估算</p></div>
+      <div class="actions"><span id="status" class="status" data-state="UNKNOWN">? 未知</span><button id="refresh" class="button" type="button">立即刷新</button></div>
+    </header>
+    <aside class="notice" aria-label="计量范围说明"><strong>边界：</strong>这些数字不是 W 整回合、账单或额度用量。不包含模型输出与推理、系统提示、历史上下文、工具定义；只估算 DevSpace MCP 的工具参数与模型可见返回载荷。Token 是已知部分的估算值，字节与字符是规范化测量载荷的精确值，不是网络 wire bytes。</aside>
+
+    <section class="controls" aria-label="时间范围">
+      <div class="range-group" role="group" aria-label="预设时间范围">
+        <button class="range-button" data-range="today" aria-pressed="true">今天</button><button class="range-button" data-range="7d" aria-pressed="false">7 天</button><button class="range-button" data-range="30d" aria-pressed="false">30 天</button><button class="range-button" data-range="all" aria-pressed="false">全部</button>
+      </div>
+      <details id="custom-details"><summary>自定义范围</summary><form id="custom-range" class="custom-form"><label>开始<input id="start" type="date" required></label><label>结束<input id="end" type="date" required></label><button class="button" type="submit">应用</button></form></details>
+      <div id="updated" class="meta">尚未载入</div>
+    </section>
+
+    <section class="metrics" aria-label="核心用量摘要">
+      <article class="card kpi-card token-card"><div class="label">已知请求估算 Token</div><div id="request-tokens" class="value">未知</div><div id="request-kpi-coverage" class="sub">请求覆盖：等待数据</div></article>
+      <article class="card kpi-card token-card"><div class="label">已知返回估算 Token</div><div id="response-tokens" class="value">未知</div><div id="response-kpi-coverage" class="sub">返回覆盖：等待数据</div></article>
+      <article class="card kpi-card"><div class="label">工具调用</div><div id="calls" class="value">未知</div><div id="call-split" class="sub">覆盖尚未建立</div></article>
+      <article class="card kpi-card"><div class="label">规范化载荷字节</div><div id="bytes" class="value">未知</div><div id="byte-split" class="sub">覆盖尚未建立</div></article>
+    </section>
+
+    <section class="coverage-strip" aria-label="估算覆盖率">
+      <div class="coverage-item">请求覆盖 <strong id="request-coverage">未知</strong></div>
+      <div class="coverage-item">返回覆盖 <strong id="response-coverage">未知</strong></div>
+      <div class="coverage-item">错误率 <strong id="error-rate">未知</strong></div>
+      <div class="coverage-item">延迟 p50 / p95 <strong id="latency">未知</strong></div>
+    </section>
+
+    <div class="grid">
+      <section class="section"><div class="section-head"><h2>日趋势</h2><div class="legend"><span>请求</span><span>返回</span></div></div><div id="chart" class="chart" aria-hidden="true"></div><details><summary class="hint">显示趋势数字表格</summary><div id="day-table" class="table-wrap"></div></details></section>
+      <section class="section"><div class="section-head"><h2>工具分布</h2><span class="hint">按已知估算 Token 排序</span></div><div id="tool-table" class="table-wrap"></div></section>
+    </div>
+
+    <section class="detail-stack" aria-label="详细信息">
+      <details id="health-details"><summary>采集健康</summary><div id="health-table" class="detail-body table-wrap"></div></details>
+      <details id="session-details"><summary>匿名会话（仅 90 天明细）</summary><div id="session-table" class="detail-body table-wrap"></div></details>
+      <details id="calls-details"><summary>调用级审计（最近 90 天，仅数字元数据）</summary><div id="calls-table" class="detail-body table-wrap"></div></details>
+    </section>
+    <p id="coverage-note" class="footer">启用前历史为 UNKNOWN。香港自然日仅用于展示，不代表模型额度窗口。</p>
+    <div id="announcer" role="status" aria-live="polite"></div>
+  </main>
+  <script type="module">
+    const number = new Intl.NumberFormat("zh-CN");
+    const compact = new Intl.NumberFormat("zh-CN",{notation:"compact",maximumFractionDigits:1});
+    let range={kind:"today"},controller,refreshTimer,lastStatus,requestSequence=0;
+    const $=(id)=>document.getElementById(id);
+    const format=(value)=>value==null?"未知":typeof value==="number"?number.format(value):String(value);
+    const short=(value)=>value==null?"未知":compact.format(value);
+    const bytes=(value)=>{if(value==null)return"未知";if(value<1024)return `${number.format(value)} B`;const units=["KiB","MiB","GiB"];let amount=value/1024,index=0;while(amount>=1024&&index<units.length-1){amount/=1024;index+=1}return `${amount.toFixed(amount>=100?0:amount>=10?1:2)} ${units[index]}`};
+    const escape=(value)=>String(value).replace(/[&<>"']/g,(character)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[character]));
+    const ratio=(entry)=>entry?.ratio==null?"不适用":`${(entry.ratio*100).toFixed(1)}%（${format(entry.known_calls)}/${format(entry.applicable_calls)}）`;
+
+    function query(){const params=new URLSearchParams({range:range.kind,calls_limit:"50"});if(range.kind==="custom"){params.set("from",range.start);params.set("to",range.end)}return params}
+    async function load({ announce=false }={}){
+      const sequence=++requestSequence;controller?.abort();controller=new AbortController();$("refresh").disabled=true;
+      try{
+        const response=await fetch(`/api/usage/snapshot?${query()}`,{signal:controller.signal,cache:"no-store"});
+        if(!response.ok)throw new Error(response.status===409?"游标已过期":"用量接口返回错误");
+        const snapshot=await response.json();if(sequence!==requestSequence)return;
+        render(snapshot);
+        $("updated").textContent=`最近刷新 ${new Date(snapshot.as_of).toLocaleTimeString("zh-CN",{hour12:false})}`;
+        if(announce)$("announcer").textContent="W 用量数据已手动刷新";
+      }catch(error){if(error.name==="AbortError")return;setStatus("UNKNOWN",true);renderUnavailable();$("updated").textContent=`载入失败：${error.message}`;$("announcer").textContent=`W 用量载入失败：${error.message}`}
+      finally{if(sequence===requestSequence)$("refresh").disabled=false}
+    }
+    function render(snapshot){
+      const {overview,health,calls:callData}=snapshot,exact=overview.exact,tokens=overview.estimated_tokens,coverage=overview.coverage;
+      setStatus(overview.status,true);
+      const exactKnown=overview.status!=="UNKNOWN",byteCoverage=exact.coverage;
+      $("request-tokens").textContent=short(tokens.request);$("response-tokens").textContent=short(tokens.response);
+      $("request-kpi-coverage").textContent=`请求覆盖：${ratio(coverage.request)}`;$("response-kpi-coverage").textContent=`返回覆盖：${ratio(coverage.response)}`;
+      $("response-kpi-coverage").title=overview.status==="UNKNOWN"
+        ?"返回 Token 覆盖：未知"
+        :`返回未知：${format(coverage.unknown_response_calls)} 次调用`;
+      $("calls").textContent=exactKnown?format(exact.calls):"未知";$("call-split").textContent=exactKnown?`${format(exact.success_calls)} 成功 / ${format(exact.failure_calls)} 失败`:"覆盖尚未建立";
+      $("bytes").textContent=exactKnown?bytes(exact.total_bytes):"未知";$("byte-split").textContent=exactKnown?`${bytes(exact.request_bytes)} / ${bytes(exact.response_bytes)}；${format(exact.total_characters)} 字符`:"覆盖尚未建立";
+      $("byte-split").title=`请求字节覆盖：${ratio(byteCoverage?.request_bytes)}；返回字节覆盖：${ratio(byteCoverage?.response_bytes)}；请求字符覆盖：${ratio(byteCoverage?.request_characters)}；返回字符覆盖：${ratio(byteCoverage?.response_characters)}`;
+      $("request-coverage").textContent=ratio(coverage.request);$("response-coverage").textContent=ratio(coverage.response);
+      $("error-rate").textContent=!exactKnown?"未知":exact.calls===0?"0.0%":`${((exact.failure_calls/exact.calls)*100).toFixed(1)}%`;
+      $("latency").textContent=overview.latency_ms.p50==null?"未知":`${format(overview.latency_ms.p50)} / ${format(overview.latency_ms.p95)} ms`;
+      renderChart(overview.by_day);renderAggregate("day-table",overview.by_day,"日期","date");renderAggregate("tool-table",overview.by_tool,"工具","tool");renderHealth(health);renderSessions(overview.by_session);renderCalls(callData.items);
+      const start=coverage.started_at?new Date(coverage.started_at).toLocaleString("zh-CN",{hour12:false}):"未知";
+      $("coverage-note").textContent=`覆盖起点：${start}。归属：W / ${overview.attribution_basis}。当前显示仅为已知载荷估算；启用前为 UNKNOWN，香港自然日不代表额度窗口。`;
+    }
+    function setStatus(state,announceTransition=false){const labels={AVAILABLE:"✓ 可用",PARTIAL:"△ 部分可用",UNKNOWN:"? 未知"};$("status").dataset.state=state;$("status").textContent=labels[state]??`? ${state}`;if(announceTransition&&lastStatus&&lastStatus!==state)$("announcer").textContent=`W 用量状态变为${labels[state]??state}`;lastStatus=state}
+    function renderUnavailable(){for(const id of ["request-tokens","response-tokens","calls","bytes","request-coverage","response-coverage","error-rate","latency"])$(id).textContent="未知";$("request-kpi-coverage").textContent="请求覆盖：未知";$("response-kpi-coverage").textContent="返回覆盖：未知";$("call-split").textContent="覆盖尚未建立";$("byte-split").textContent="覆盖尚未建立";$("chart").innerHTML='<div class="empty">暂无可用数据</div>';$("day-table").innerHTML='<div class="empty">暂无可用数据</div>';$("tool-table").innerHTML='<div class="empty">暂无可用数据</div>';$("health-table").innerHTML='<div class="empty">暂无可用数据</div>';$("session-table").innerHTML='<div class="empty">暂无可用数据</div>';$("calls-table").innerHTML='<div class="empty">暂无可用数据</div>';$("coverage-note").textContent="覆盖状态未知；不得把未采集或载入失败解释为零用量。"}
+    function renderChart(rows){const maximum=Math.max(1,...rows.flatMap((row)=>[row.estimated_tokens.request??0,row.estimated_tokens.response??0]));$("chart").innerHTML=rows.length?rows.map((row)=>`<div class="bar-group" title="${escape(row.date)} 请求 ${format(row.estimated_tokens.request)}，返回 ${format(row.estimated_tokens.response)}"><div class="bars"><div class="bar" style="height:${((row.estimated_tokens.request??0)/maximum)*100}%"></div><div class="bar response" style="height:${((row.estimated_tokens.response??0)/maximum)*100}%"></div></div><div class="bar-label">${escape(row.date.slice(5))}</div></div>`).join(""):'<div class="empty">当前范围暂无调用</div>'}
+    function renderAggregate(id,rows,first,key){$(id).innerHTML=rows.length?`<table><thead><tr><th>${first}</th><th>调用</th><th>请求 Token</th><th>返回 Token</th><th>请求已知 / 适用</th><th>返回已知 / 适用</th><th>请求/返回字节已知</th></tr></thead><tbody>${rows.map((row)=>`<tr><td>${escape(row[key])}</td><td>${format(row.calls)}</td><td>${format(row.estimated_tokens.request)}</td><td>${format(row.estimated_tokens.response)}</td><td>${format(row.estimated_tokens.request_known_calls)} / ${format(row.estimated_tokens.request_applicable_calls)}</td><td>${format(row.estimated_tokens.response_known_calls)} / ${format(row.estimated_tokens.response_applicable_calls)}</td><td>${format(row.exact?.coverage?.request_bytes?.known_calls)} / ${format(row.exact?.coverage?.response_bytes?.known_calls)}</td></tr>`).join("")}</tbody></table>`:'<div class="empty">暂无数据</div>'}
+    function renderSessions(rows){$("session-table").innerHTML=rows.length?`<table><thead><tr><th>匿名引用</th><th>调用</th><th>已知估算 Token</th><th>已知侧</th></tr></thead><tbody>${rows.map((row)=>`<tr><td class="mono">${escape(row.session_ref)}</td><td>${format(row.calls)}</td><td>${format(row.estimated_tokens)}</td><td>${format(row.known_sides)} / ${format(row.applicable_sides)}</td></tr>`).join("")}</tbody></table>`:'<div class="empty">暂无可归属明细</div>'}
+    function renderHealth(health){const lastWrite=health.last_successful_write_at?new Date(health.last_successful_write_at).toLocaleString("zh-CN",{hour12:false}):"未知";const lastToken=health.last_tokenizer_success_at?new Date(health.last_tokenizer_success_at).toLocaleString("zh-CN",{hour12:false}):"未知";const queue=health.queue_bytes==null?"未知":`${format(health.queue_bytes)} B`;const queueAge=health.oldest_queue_item_age_ms==null?"无排队":`${format(health.oldest_queue_item_age_ms)} ms`;const failures=health.failure_counters&&Object.keys(health.failure_counters).length?Object.entries(health.failure_counters).filter(([key])=>key!=="by_reason").map(([key,value])=>`${key}=${format(value)}`).join(" · "):"无";const tokenizerFailures=health.tokenizer_failure_counts&&Object.keys(health.tokenizer_failure_counts).length?Object.entries(health.tokenizer_failure_counts).map(([key,value])=>`${key}=${format(value)}`).join(" · "):"无";const rows=[["Writer",health.writer_state],["最后成功写入",lastWrite],["最后 Token 成功",lastToken],["队列载荷",queue],["最老排队等待",queueAge],["失败计数",failures],["Tokenizer 失败分类",tokenizerFailures],["累计调用",health.total_calls],["保留明细",health.retained_calls],["归档汇总",health.archived_calls],["部分覆盖",health.partial_calls],["未完成",health.incomplete_calls],["丢弃估算",health.dropped_calls],["未归属",health.unattributed_calls],["缓存校验",health.tokenizer_cache_status]];$("health-table").innerHTML=`<table><thead><tr><th>指标</th><th>状态 / 数量</th></tr></thead><tbody>${rows.map(([label,value])=>`<tr><td>${label}</td><td>${escape(value)}</td></tr>`).join("")}</tbody></table>`}
+    function renderCalls(rows){$("calls-table").innerHTML=rows.length?`<table><thead><tr><th>时间</th><th>工具</th><th>结果</th><th>请求状态</th><th>返回状态</th><th>请求 Token</th><th>返回 Token</th><th>请求 / 返回字节</th><th>耗时</th></tr></thead><tbody>${rows.map((row)=>`<tr><td>${escape(new Date(row.started_at).toLocaleString("zh-CN",{hour12:false}))}</td><td>${escape(row.tool)}</td><td class="${row.outcome==="ERROR"?"error":""}">${escape(row.outcome)}</td><td>${escape(row.request_token_status)}</td><td>${escape(row.response_token_status)}</td><td>${format(row.request_tokens)}</td><td>${format(row.response_tokens)}</td><td>${format(row.request_bytes)} / ${format(row.response_bytes)}</td><td>${row.duration_ms==null?"未知":`${format(row.duration_ms)} ms`}</td></tr>`).join("")}</tbody></table>`:'<div class="empty">暂无调用明细</div>'}
+    document.querySelectorAll("[data-range]").forEach((button)=>button.addEventListener("click",()=>{range={kind:button.dataset.range};document.querySelectorAll("[data-range]").forEach((candidate)=>candidate.setAttribute("aria-pressed",String(candidate===button)));load({announce:true})}));
+    $("custom-range").addEventListener("submit",(event)=>{event.preventDefault();range={kind:"custom",start:$("start").value,end:$("end").value};document.querySelectorAll("[data-range]").forEach((button)=>button.setAttribute("aria-pressed","false"));load({announce:true})});
+    $("refresh").addEventListener("click",()=>load({announce:true}));
+    document.addEventListener("visibilitychange",()=>{clearInterval(refreshTimer);refreshTimer=undefined;if(!document.hidden){load({ announce: false });refreshTimer=setInterval(load,5000)}});
+    load({ announce: false });refreshTimer=setInterval(load,5000);
+  </script>
+</body>
+</html>

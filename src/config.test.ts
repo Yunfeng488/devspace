@@ -7,6 +7,7 @@ import { loadConfig } from "./config.js";
 const emptyConfigDir = mkdtempSync(join(tmpdir(), "devspace-empty-config-test-"));
 const baseEnv = {
   DEVSPACE_CONFIG_DIR: emptyConfigDir,
+  DEVSPACE_STATE_DIR: emptyConfigDir,
   DEVSPACE_ALLOWED_ROOTS: process.cwd(),
   DEVSPACE_OAUTH_OWNER_TOKEN: "test-owner-token-that-is-long-enough",
 };
@@ -27,6 +28,64 @@ assert.equal(loadConfig(baseEnv).devspaceAgentsDir, join(emptyConfigDir, "agents
 assert.deepEqual(loadConfig(baseEnv).subagents, { enabled: false, providers: [] });
 assert.equal(loadConfig(baseEnv).artifactsEnabled, false);
 assert.equal(loadConfig(baseEnv).artifactMaxFileBytes, 100 * 1024 * 1024);
+assert.deepEqual(loadConfig(baseEnv).usage, {
+  enabled: false,
+  stateDir: join(emptyConfigDir, "usage"),
+  pythonExecutable: "python",
+  workerPath: "",
+  workerSha256: "",
+  requestTimeoutMs: 10_000,
+  shutdownTimeoutMs: 5_000,
+  retentionDays: 90,
+  maxEventBytes: 16 * 1024 * 1024,
+  maxQueueBytes: 64 * 1024 * 1024,
+});
+assert.deepEqual(
+  loadConfig({
+    ...baseEnv,
+    DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage",
+    DEVSPACE_USAGE_PYTHON: "C:\\Python311\\python.exe",
+    DEVSPACE_USAGE_WORKER: "C:\\DevSpace\\runtime\\tiktoken-worker.py",
+    DEVSPACE_USAGE_WORKER_SHA256: "a".repeat(64),
+    DEVSPACE_USAGE_RETENTION_DAYS: "30",
+    DEVSPACE_USAGE_MAX_EVENT_BYTES: "1024",
+    DEVSPACE_USAGE_MAX_QUEUE_BYTES: "4096",
+  }).usage,
+  {
+    enabled: true,
+    stateDir: "H:\\workbuddy\\runtime\\devspace-usage",
+    pythonExecutable: "C:\\Python311\\python.exe",
+    workerPath: "C:\\DevSpace\\runtime\\tiktoken-worker.py",
+    workerSha256: "a".repeat(64),
+    requestTimeoutMs: 10_000,
+    shutdownTimeoutMs: 5_000,
+    retentionDays: 30,
+    maxEventBytes: 1024,
+    maxQueueBytes: 4096,
+  },
+);
+assert.throws(
+  () => loadConfig({ ...baseEnv, DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage" }),
+  /DEVSPACE_USAGE_WORKER is required/,
+);
+assert.throws(
+  () => loadConfig({
+    ...baseEnv,
+    DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage",
+    DEVSPACE_USAGE_WORKER: "relative-worker.py",
+    DEVSPACE_USAGE_WORKER_SHA256: "a".repeat(64),
+  }),
+  /DEVSPACE_USAGE_WORKER must be an absolute path/,
+);
+assert.throws(
+  () => loadConfig({
+    ...baseEnv,
+    DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage",
+    DEVSPACE_USAGE_WORKER: "C:\\worker.py",
+    DEVSPACE_USAGE_WORKER_SHA256: "not-a-hash",
+  }),
+  /DEVSPACE_USAGE_WORKER_SHA256 must be a SHA-256/,
+);
 assert.equal(loadConfig({ ...baseEnv, DEVSPACE_ARTIFACTS: "1" }).artifactsEnabled, true);
 assert.equal(
   loadConfig({ ...baseEnv, DEVSPACE_ARTIFACT_MAX_FILE_BYTES: "123" }).artifactMaxFileBytes,

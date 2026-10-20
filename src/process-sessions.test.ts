@@ -114,13 +114,23 @@ const defaultInteractive = await manager.start({
 assert.equal(defaultInteractive.running, true);
 assert.ok(defaultInteractive.sessionId);
 
-const defaultInputResult = await manager.write({
+let defaultInputResult = await manager.write({
   workspaceId: "workspace-a",
   sessionId: defaultInteractive.sessionId,
   chars: "hello\n",
 });
+let defaultOutput = defaultInputResult.output;
+for (let attempt = 0; defaultInputResult.running && attempt < 10; attempt += 1) {
+  defaultInputResult = await manager.write({
+    workspaceId: "workspace-a",
+    sessionId: defaultInteractive.sessionId,
+    chars: "",
+    yieldTimeMs: 500,
+  });
+  defaultOutput += defaultInputResult.output;
+}
 assert.equal(defaultInputResult.running, false);
-assert.match(defaultInputResult.output, /default-input:hello/);
+assert.match(defaultOutput, /default-input:hello/);
 
 const noisyInteractive = await manager.start({
   workspaceId: "workspace-a",
