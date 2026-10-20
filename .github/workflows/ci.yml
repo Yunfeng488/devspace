@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - codex/w-devspace-usage
   pull_request:
 
 concurrency:
@@ -60,6 +61,15 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Usage runtime release gate
+        run: npm run test:usage-runtime
+
+      - name: Package dry run
+        run: npm pack --dry-run --json
+
+      - name: Usage monitor performance gate
+        run: npm run benchmark:usage
 
       - name: Doctor
         run: node dist/cli.js doctor
