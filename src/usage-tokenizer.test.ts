@@ -660,7 +660,13 @@ function runWorker(
   cache: { directory: string; expectedHash: string },
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolvePromise, reject) => {
-    const child = spawn("py", ["-3.11", workerPath, `--expected-cache-sha256=${cache.expectedHash}`], {
+    const pythonExecutable = process.platform === "win32" ? "py" : "python3";
+    const pythonArguments = process.platform === "win32" ? ["-3.11"] : [];
+    const child = spawn(pythonExecutable, [
+      ...pythonArguments,
+      workerPath,
+      `--expected-cache-sha256=${cache.expectedHash}`,
+    ], {
       windowsHide: true,
       env: {
         ...process.env,
