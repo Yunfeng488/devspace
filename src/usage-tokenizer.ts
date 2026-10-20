@@ -124,7 +124,6 @@ export class TokenizationQueue {
       this.whenIdle().then(() => true),
       new Promise<boolean>((resolve) => {
         timer = setTimeout(() => resolve(false), Math.max(0, timeoutMs));
-        timer.unref?.();
       }),
     ]);
     if (timer) clearTimeout(timer);

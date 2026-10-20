@@ -1,10 +1,13 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { loadConfig } from "./config.js";
 
 const emptyConfigDir = mkdtempSync(join(tmpdir(), "devspace-empty-config-test-"));
+const usageDirectory = resolve(emptyConfigDir, "usage-enabled");
+const usagePython = resolve(emptyConfigDir, "python");
+const usageWorker = resolve(emptyConfigDir, "tiktoken-worker.py");
 const baseEnv = {
   DEVSPACE_CONFIG_DIR: emptyConfigDir,
   DEVSPACE_STATE_DIR: emptyConfigDir,
@@ -43,9 +46,9 @@ assert.deepEqual(loadConfig(baseEnv).usage, {
 assert.deepEqual(
   loadConfig({
     ...baseEnv,
-    DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage",
-    DEVSPACE_USAGE_PYTHON: "C:\\Python311\\python.exe",
-    DEVSPACE_USAGE_WORKER: "C:\\DevSpace\\runtime\\tiktoken-worker.py",
+    DEVSPACE_USAGE_DIR: usageDirectory,
+    DEVSPACE_USAGE_PYTHON: usagePython,
+    DEVSPACE_USAGE_WORKER: usageWorker,
     DEVSPACE_USAGE_WORKER_SHA256: "a".repeat(64),
     DEVSPACE_USAGE_RETENTION_DAYS: "30",
     DEVSPACE_USAGE_MAX_EVENT_BYTES: "1024",
@@ -53,9 +56,9 @@ assert.deepEqual(
   }).usage,
   {
     enabled: true,
-    stateDir: "H:\\workbuddy\\runtime\\devspace-usage",
-    pythonExecutable: "C:\\Python311\\python.exe",
-    workerPath: "C:\\DevSpace\\runtime\\tiktoken-worker.py",
+    stateDir: usageDirectory,
+    pythonExecutable: usagePython,
+    workerPath: usageWorker,
     workerSha256: "a".repeat(64),
     requestTimeoutMs: 10_000,
     shutdownTimeoutMs: 5_000,
@@ -65,13 +68,13 @@ assert.deepEqual(
   },
 );
 assert.throws(
-  () => loadConfig({ ...baseEnv, DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage" }),
+  () => loadConfig({ ...baseEnv, DEVSPACE_USAGE_DIR: usageDirectory }),
   /DEVSPACE_USAGE_WORKER is required/,
 );
 assert.throws(
   () => loadConfig({
     ...baseEnv,
-    DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage",
+    DEVSPACE_USAGE_DIR: usageDirectory,
     DEVSPACE_USAGE_WORKER: "relative-worker.py",
     DEVSPACE_USAGE_WORKER_SHA256: "a".repeat(64),
   }),
@@ -80,8 +83,8 @@ assert.throws(
 assert.throws(
   () => loadConfig({
     ...baseEnv,
-    DEVSPACE_USAGE_DIR: "H:\\workbuddy\\runtime\\devspace-usage",
-    DEVSPACE_USAGE_WORKER: "C:\\worker.py",
+    DEVSPACE_USAGE_DIR: usageDirectory,
+    DEVSPACE_USAGE_WORKER: usageWorker,
     DEVSPACE_USAGE_WORKER_SHA256: "not-a-hash",
   }),
   /DEVSPACE_USAGE_WORKER_SHA256 must be a SHA-256/,
