@@ -300,7 +300,7 @@ test("telemetry keeps a thrown handler response UNKNOWN instead of overstating t
     telemetrySink: { emit: (observation) => observations.push(observation) },
   });
   try {
-    const wrapped = monitor.wrapHandler("read", async () => {
+    const wrapped = monitor.wrapHandler("read", async (_input: unknown, _extra: unknown) => {
       throw new Error("PRIVATE-HANDLER-ERROR");
     });
     await assert.rejects(wrapped({ path: "PRIVATE-PATH" }, { _meta: {} }), /PRIVATE-HANDLER-ERROR/);
