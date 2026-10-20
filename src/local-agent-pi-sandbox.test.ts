@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { existsSync, mkdirSync, realpathSync } from "node:fs";
-import { mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { SandboxManager } from "@anthropic-ai/sandbox-runtime";
@@ -43,12 +43,11 @@ if (SandboxManager.isSupportedPlatform() && dependencies.errors.length === 0) {
       true,
       "sandboxed Pi bash can write inside the workspace",
     );
-    await assert.rejects(
-      bash.execute("bash-outside-write-test", {
-        command: `touch '${outside}'`,
-      }),
-      /Read-only file system|Command exited with code/,
-    );
+    const outsideWrite = await bash.execute("bash-outside-write-test", {
+      command: `touch '${outside}'`,
+    }) as { isError?: boolean; structuredContent?: { exit_code?: number } };
+    assert.equal(outsideWrite.isError, true, "sandbox denial is reported as a failed Pi tool result");
+    assert.notEqual(outsideWrite.structuredContent?.exit_code, 0, "sandbox denial returns a non-zero exit code");
     assert.equal(existsSync(outside), false, "sandboxed Pi bash cannot write outside the workspace");
 
     const read = tools.get("read");
@@ -86,9 +85,14 @@ if (SandboxManager.isSupportedPlatform() && dependencies.errors.length === 0) {
       "the process-global sandbox config protects workspace environment files on Windows too",
     );
     await writeFile(envPath, "before\n");
-    await assert.rejects(
-      bash.execute("env-write-test", { command: `printf 'after\\n' > '${envPath}'` }),
-      /Read-only file system|Command exited with code/,
+    const envWrite = await bash.execute("env-write-test", {
+      command: `printf 'after\\n' > '${envPath}'`,
+    }) as { isError?: boolean; structuredContent?: { exit_code?: number } };
+    assert.equal(envWrite.isError, true, "protected environment-file denial is a failed Pi tool result");
+    assert.notEqual(envWrite.structuredContent?.exit_code, 0, "protected environment-file denial returns non-zero");
+    assert.equal(
+      await readFile(envPath, "utf8"),
+      "before\n",
       "sandboxed Pi bash cannot overwrite protected workspace environment files",
     );
   } finally {

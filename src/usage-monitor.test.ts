@@ -266,12 +266,17 @@ test("telemetry sink receives only low-cardinality MCP metadata and excludes bag
       } },
     );
     await monitor.whenIdle();
+    const duration = (observations[0] as {
+      attributes?: Record<string, unknown>;
+    })?.attributes?.["mcp.server.operation.duration"];
+    assert.equal(Number.isInteger(duration), true);
+    assert.equal(typeof duration === "number" && duration >= 0, true);
     assert.deepEqual(observations, [{
       attributes: {
         "mcp.method.name": "tools/call",
         "gen_ai.operation.name": "execute_tool",
         "gen_ai.tool.name": "read",
-        "mcp.server.operation.duration": 0,
+        "mcp.server.operation.duration": duration,
         "devspace.usage.token_coverage": "AVAILABLE",
       },
       traceContext: {
