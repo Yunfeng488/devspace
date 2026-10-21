@@ -15,6 +15,10 @@
   `@modelcontextprotocol/sdk@1.29.0`, and `express@5.2.1`.
 - `.playwright-cli/` is pre-existing untracked output and is excluded from all
   commits.
+- One test-only compatibility change adds bounded polling to
+  `src/process-sessions.test.ts`. The exact v1.0.8 assertion races process exit
+  on Node 24 and can raise `EPIPE` on the macOS Node 22 runner. No shipped
+  process-session or Pi runtime code is changed.
 - This evidence does not authorize deployment, a 7676/8787 restart, panel or
   tunnel changes, credential access, or writes to `%USERPROFILE%\.workbuddy`.
 

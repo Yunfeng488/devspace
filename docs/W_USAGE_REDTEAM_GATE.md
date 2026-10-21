@@ -40,6 +40,9 @@ authorized by this document.
 - No Pi `ModelRuntime` migration, dependency upgrade, forced override,
   downgrade, or audit-ignore rule remains in the candidate.
 - `.playwright-cli/` is excluded and no `H:\workbuddy` change is absorbed.
+- The only non-monitor diff is bounded polling in
+  `src/process-sessions.test.ts`, required to avoid the base test's process-exit
+  race (`EPIPE` on macOS); it changes no shipped runtime module.
 
 ## Cross-platform evidence
 
