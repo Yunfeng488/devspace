@@ -562,40 +562,49 @@ test("a real MCP client exercises every enabled full-mode tool through the usage
       ["bash", "edit", "glob", "grep", "ls", "open_workspace", "read", "show_changes", "write"],
     );
 
-    const opened = await callTool(client, "open_workspace", { path: project });
+    const observedResults = new Map<string, Awaited<ReturnType<typeof callTool>>>();
+    const recordTool = async (tool: string, args: Record<string, unknown>) => {
+      const result = await callTool(client, tool, args);
+      observedResults.set(tool, result);
+      return result;
+    };
+
+    const opened = await recordTool("open_workspace", { path: project });
     const workspaceId = String(asRecord(opened.structuredContent)?.workspaceId);
     assert.ok(workspaceId);
 
     const readArguments = { workspaceId, path: "fixture.txt" };
-    const readResult = await callTool(client, "read", readArguments);
-    await callTool(client, "write", {
+    const readResult = await recordTool("read", readArguments);
+    await recordTool("write", {
       workspaceId,
       path: "created.txt",
       content: "created by fixture\n",
     });
-    await callTool(client, "edit", {
+    await recordTool("edit", {
       workspaceId,
       path: "created.txt",
       edits: [{ oldText: "fixture", newText: "edited" }],
     });
-    await callTool(client, "grep", { workspaceId, pattern: "edited", path: "." });
-    await callTool(client, "glob", { workspaceId, pattern: "*.txt", path: "." });
-    await callTool(client, "ls", { workspaceId, path: "." });
-    await callTool(client, "bash", { workspaceId, command: "node --version" });
-    await callTool(client, "show_changes", { workspaceId });
+    await recordTool("grep", { workspaceId, pattern: "edited", path: "." });
+    await recordTool("glob", { workspaceId, pattern: "*.txt", path: "." });
+    await recordTool("ls", { workspaceId, path: "." });
+    await recordTool("bash", { workspaceId, command: "node --version" });
+    await recordTool("show_changes", { workspaceId });
     await monitor.whenIdle();
 
-    const successfulCalls = monitor.store.listCalls({ limit: 100 });
-    assert.equal(successfulCalls.length, 9);
+    const recordedCalls = monitor.store.listCalls({ limit: 100 });
+    assert.equal(recordedCalls.length, 9);
     assert.deepEqual(
-      successfulCalls.map((call) => call.tool).sort(),
+      recordedCalls.map((call) => call.tool).sort(),
       ["bash", "edit", "glob", "grep", "ls", "open_workspace", "read", "show_changes", "write"],
     );
-    assert.ok(successfulCalls.every((call) => call.outcome === "SUCCESS"));
-    assert.ok(successfulCalls.every((call) => call.request_token_status === "AVAILABLE"));
-    assert.ok(successfulCalls.every((call) => call.response_token_status === "AVAILABLE"));
+    for (const call of recordedCalls) {
+      assert.equal(call.outcome, observedResults.get(call.tool)?.isError ? "ERROR" : "SUCCESS");
+      assert.equal(call.request_token_status, "AVAILABLE");
+      assert.equal(call.response_token_status, "AVAILABLE");
+    }
 
-    const readRow = successfulCalls.find((call) => call.tool === "read");
+    const readRow = recordedCalls.find((call) => call.tool === "read");
     assert.ok(readRow);
     const expectedRequest = measureRequestPayload(readArguments);
     const expectedResponse = measureResponsePayload(readResult);
@@ -604,7 +613,7 @@ test("a real MCP client exercises every enabled full-mode tool through the usage
     assert.equal(readRow.response_bytes, expectedResponse.bytes);
     assert.equal(readRow.response_characters, expectedResponse.characters);
 
-    const beforeError = successfulCalls.length;
+    const beforeError = recordedCalls.length;
     const toolError = await callTool(client, "read", { workspaceId, path: "missing.txt" });
     assert.equal(toolError.isError, true);
     await monitor.whenIdle();
