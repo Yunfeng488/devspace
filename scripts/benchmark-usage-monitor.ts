@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { performance } from "node:perf_hooks";
 import { measureRequestPayload, measureResponsePayload } from "../src/usage-metrics.js";
 import { createUsageMonitor } from "../src/usage-monitor.js";
+import { queryUsageOverview } from "../contrib/w-usage-panel/usage-api.mjs";
 
 const calls = 1_000;
 const payload = {
@@ -77,8 +78,28 @@ try {
   );
   await monitor.whenIdle();
 
+  const today = hongKongDate(Date.now());
+  const intervalRangeStart = new Date(Date.parse(`${today}T00:00:00Z`) - 89 * 86_400_000)
+    .toISOString().slice(0, 10);
+  const intervalQueryDurations: number[] = [];
+  let intervalBuckets = 0;
+  for (let index = 0; index < 20; index += 1) {
+    const started = performance.now();
+    const overview = queryUsageOverview(join(directory, "usage.sqlite"), {
+      range: "custom",
+      start: intervalRangeStart,
+      end: today,
+      interval: "4h",
+      nowMs: Date.now(),
+      runtimeHealth: { writer_state: "ACTIVE" },
+    });
+    intervalQueryDurations.push(performance.now() - started);
+    intervalBuckets = overview.by_interval.length;
+  }
+
   const addedP95Ms = percentile(added, 0.95);
   const p95RegressionPercent = baseline.p95 === 0 ? null : (addedP95Ms / baseline.p95) * 100;
+  const intervalQueryP95Ms = percentile(intervalQueryDurations, 0.95);
   const diagnostic = JSON.stringify({
     calls,
     interleaved_pairs: calls,
@@ -89,6 +110,9 @@ try {
     measured_p95_ms: measured.p95,
     added_p95_ms: addedP95Ms,
     p95_regression_percent: p95RegressionPercent,
+    interval_query_rows: calls,
+    interval_query_buckets: intervalBuckets,
+    interval_query_p95_ms: intervalQueryP95Ms,
     sync_phase_p95_ms: Object.fromEntries(
       Object.entries(collectPhases).map(([name, values]) => [name, percentile(values, 0.95)]),
     ),
@@ -98,6 +122,10 @@ try {
   assert.ok(
     p95RegressionPercent === null || p95RegressionPercent <= 5,
     `p95 end-to-end regression ${p95RegressionPercent?.toFixed(2)}% exceeds 5%`,
+  );
+  assert.ok(
+    intervalQueryP95Ms < 250,
+    `90-day 4h interval query p95 ${intervalQueryP95Ms.toFixed(3)}ms is not below 250ms`,
   );
 } finally {
   await monitor.close();
@@ -145,4 +173,12 @@ function percentile(values: number[], fraction: number): number {
   if (values.length === 0) return 0;
   const sorted = [...values].sort((left, right) => left - right);
   return sorted[Math.ceil(sorted.length * fraction) - 1] ?? 0;
+}
+
+function hongKongDate(timestampMs: number): string {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Hong_Kong", year: "numeric", month: "2-digit", day: "2-digit",
+  }).formatToParts(new Date(timestampMs));
+  const value = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${value.year}-${value.month}-${value.day}`;
 }

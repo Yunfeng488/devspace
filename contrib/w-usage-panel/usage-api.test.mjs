@@ -55,6 +55,43 @@ test("invalid API input returns a fixed error without reflecting the query", asy
   }
 });
 
+test("interval queries reject unsupported values and oversized ranges with fixed safe reasons", async () => {
+  const fixture = await createFixture();
+  try {
+    const pagePath = join(fixture.directory, "usage.html");
+    await writeFile(pagePath, "<!doctype html>", "utf8");
+    const handler = createUsageRequestHandler({ databasePath: fixture.databasePath, pagePath });
+
+    const unsupported = captureResponse();
+    await handler(
+      { method: "GET" },
+      unsupported,
+      new URL("http://127.0.0.1:8787/api/usage/overview?range=today&interval=PRIVATE_INTERVAL"),
+    );
+    assert.equal(unsupported.status, 400);
+    assert.deepEqual(JSON.parse(unsupported.body), {
+      error: "invalid_usage_query",
+      reason: "unsupported_interval",
+    });
+    assert.doesNotMatch(unsupported.body, /PRIVATE_INTERVAL/);
+
+    const oversized = captureResponse();
+    await handler(
+      { method: "GET" },
+      oversized,
+      new URL("http://127.0.0.1:8787/api/usage/snapshot?range=30d&interval=15m"),
+    );
+    assert.equal(oversized.status, 400);
+    assert.deepEqual(JSON.parse(oversized.body), {
+      error: "invalid_usage_query",
+      reason: "interval_range_too_large",
+      max_days: 7,
+    });
+  } finally {
+    await fixture.close();
+  }
+});
+
 test("invalid integer pagination is rejected instead of silently clamped", async () => {
   const fixture = await createFixture();
   try {
@@ -206,6 +243,175 @@ test("overview keeps exact counts separate from partial token estimates", async 
       overview.by_session.find((session) => session.session_ref === "UNATTRIBUTED"),
       { session_ref: "UNATTRIBUTED", calls: 1, estimated_tokens: null, known_sides: 0, applicable_sides: 2 },
     );
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("overview groups retained calls into Hong Kong aligned interval buckets", async () => {
+  const fixture = await createFixture();
+  try {
+    const expectations = [
+      ["15m", 48, "2026-10-18T01:00:00.000Z", "2026-10-18T01:15:00.000Z"],
+      ["30m", 24, "2026-10-18T01:00:00.000Z", "2026-10-18T01:30:00.000Z"],
+      ["1h", 12, "2026-10-18T01:00:00.000Z", "2026-10-18T02:00:00.000Z"],
+      ["4h", 3, "2026-10-18T00:00:00.000Z", "2026-10-18T04:00:00.000Z"],
+    ];
+    for (const [interval, bucketCount, start, end] of expectations) {
+      const overview = queryUsageOverview(fixture.databasePath, {
+        range: "today",
+        interval,
+        nowMs: Date.UTC(2026, 9, 18, 4),
+        runtimeHealth: { writer_state: "ACTIVE" },
+      });
+      assert.equal(overview.interval, interval);
+      assert.equal(overview.interval_scope, "RETAINED_CALLS_ONLY");
+      assert.equal(overview.by_interval.length, bucketCount);
+      const bucket = overview.by_interval.find((entry) => entry.calls === 2);
+      assert.equal(bucket.start, start);
+      assert.equal(bucket.end, end);
+      assert.equal(bucket.status, "PARTIAL");
+      assert.deepEqual(bucket.estimated_tokens, {
+        request: 7,
+        response: 11,
+        total: 18,
+        request_known_calls: 1,
+        request_applicable_calls: 2,
+        request_ratio: 0.5,
+        response_known_calls: 1,
+        response_applicable_calls: 2,
+        response_ratio: 0.5,
+        total_calls: 2,
+      });
+    }
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("interval buckets distinguish monitored zero usage from a full coverage gap", async () => {
+  const fixture = await createFixture();
+  try {
+    const database = new DatabaseSync(fixture.databasePath);
+    database.prepare("insert into usage_gaps(started_at_ms, ended_at_ms, reason) values (?, ?, ?)")
+      .run(
+        Date.parse("2026-10-17T16:15:00.000Z"),
+        Date.parse("2026-10-17T16:30:00.000Z"),
+        "INTERRUPTED",
+      );
+    database.close();
+
+    const overview = queryUsageOverview(fixture.databasePath, {
+      range: "today",
+      interval: "15m",
+      nowMs: Date.UTC(2026, 9, 18, 4),
+      runtimeHealth: { writer_state: "ACTIVE" },
+    });
+    const monitoredZero = overview.by_interval[0];
+    assert.equal(monitoredZero.status, "AVAILABLE");
+    assert.equal(monitoredZero.calls, 0);
+    assert.deepEqual(monitoredZero.estimated_tokens, {
+      request: 0,
+      response: 0,
+      total: 0,
+      request_known_calls: 0,
+      request_applicable_calls: 0,
+      request_ratio: null,
+      response_known_calls: 0,
+      response_applicable_calls: 0,
+      response_ratio: null,
+      total_calls: 0,
+    });
+    const unknown = overview.by_interval[1];
+    assert.equal(unknown.start, "2026-10-17T16:15:00.000Z");
+    assert.equal(unknown.status, "UNKNOWN");
+    assert.equal(unknown.calls, 0);
+    assert.equal(unknown.estimated_tokens.request, null);
+    assert.equal(unknown.estimated_tokens.response, null);
+    assert.equal(unknown.estimated_tokens.total, null);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("partial gap overlap and an unfinished current bucket are explicitly partial", async () => {
+  const fixture = await createFixture();
+  try {
+    const database = new DatabaseSync(fixture.databasePath);
+    database.prepare("insert into usage_gaps(started_at_ms, ended_at_ms, reason) values (?, ?, ?)")
+      .run(
+        Date.parse("2026-10-17T16:20:00.000Z"),
+        Date.parse("2026-10-17T16:25:00.000Z"),
+        "INTERRUPTED",
+      );
+    database.close();
+
+    const overview = queryUsageOverview(fixture.databasePath, {
+      range: "today",
+      interval: "15m",
+      nowMs: Date.parse("2026-10-17T16:37:00.000Z"),
+      runtimeHealth: { writer_state: "ACTIVE" },
+    });
+    assert.equal(overview.by_interval[1].status, "PARTIAL");
+    assert.equal(overview.by_interval[1].estimated_tokens.total, null);
+    assert.equal(overview.by_interval.at(-1).end, "2026-10-17T16:37:00.000Z");
+    assert.equal(overview.by_interval.at(-1).status, "PARTIAL");
+    assert.equal(overview.by_interval.at(-1).estimated_tokens.total, null);
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("snapshot uses its fixed as-of boundary for short interval data", async () => {
+  const fixture = await createFixture();
+  try {
+    const asOfMs = Date.UTC(2026, 9, 18, 4);
+    const snapshot = queryUsageSnapshot(fixture.databasePath, {
+      range: "today", interval: "1h", asOfMs,
+    });
+    assert.equal(snapshot.overview.interval, "1h");
+    assert.equal(snapshot.overview.by_interval.length, 12);
+    assert.equal(snapshot.overview.by_interval.at(-1).end, snapshot.as_of);
+    assert.equal(snapshot.overview.available_from, "2026-07-20T04:00:00.000Z");
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("each interval accepts its documented maximum range and rejects one extra day", async () => {
+  const fixture = await createFixture();
+  try {
+    const nowMs = Date.UTC(2026, 9, 18, 4);
+    const cases = [
+      ["15m", "2026-10-12", "2026-10-11", 7],
+      ["30m", "2026-10-05", "2026-10-04", 14],
+      ["1h", "2026-09-19", "2026-09-18", 30],
+      ["4h", "2026-07-21", "2026-07-20", 90],
+    ];
+    for (const [interval, acceptedStart, rejectedStart, maxDays] of cases) {
+      const overview = queryUsageOverview(fixture.databasePath, {
+        range: "custom", start: acceptedStart, end: "2026-10-18", interval, nowMs,
+      });
+      assert.equal(overview.interval, interval);
+      assert.throws(() => queryUsageOverview(fixture.databasePath, {
+        range: "custom", start: rejectedStart, end: "2026-10-18", interval, nowMs,
+      }), (error) => error.reason === "interval_range_too_large" && error.maxDays === maxDays);
+    }
+  } finally {
+    await fixture.close();
+  }
+});
+
+test("omitting interval preserves the existing overview response shape", async () => {
+  const fixture = await createFixture();
+  try {
+    const overview = queryUsageOverview(fixture.databasePath, {
+      range: "today", nowMs: Date.UTC(2026, 9, 18, 4),
+    });
+    assert.equal("interval" in overview, false);
+    assert.equal("interval_scope" in overview, false);
+    assert.equal("available_from" in overview, false);
+    assert.equal("by_interval" in overview, false);
   } finally {
     await fixture.close();
   }

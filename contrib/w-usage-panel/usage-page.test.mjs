@@ -60,3 +60,25 @@ test("usage page explains tokenizer recovery and queue age without rendering pay
   assert.match(html, /最老排队等待/);
   assert.match(html, /Tokenizer 失败分类/);
 });
+
+test("usage page offers accessible short-interval token trends without fake OHLC", async () => {
+  const html = await readFile(pageUrl, "utf8");
+  for (const [value, label] of [["15m", "15 分钟"], ["30m", "30 分钟"], ["1h", "1 小时"], ["4h", "4 小时"]]) {
+    assert.match(html, new RegExp(`data-interval="${value}"[^>]*>${label}`));
+  }
+  assert.match(html, /aria-label="趋势周期"/);
+  assert.match(html, /interval_range_too_large/);
+  assert.match(html, /RETAINED_CALLS_ONLY/);
+  assert.match(html, /请求 Token/);
+  assert.match(html, /返回 Token/);
+  assert.match(html, /部分覆盖/);
+  assert.match(html, /renderIntervalChart/);
+  assert.match(html, /finestInterval/);
+  assert.match(html, /button\.disabled=!allowed/);
+  assert.match(html, /setInterval\(load,5000\)/);
+  assert.match(html, /activeBucketStart/);
+  assert.match(html, /ArrowRight/);
+  assert.match(html, /preventScroll:true/);
+  assert.doesNotMatch(html, /tabindex="0" role="img"/);
+  assert.doesNotMatch(html, /\b(?:open|high|low|close|OHLC)\b/i);
+});

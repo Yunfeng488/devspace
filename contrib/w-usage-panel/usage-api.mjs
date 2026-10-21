@@ -4,6 +4,14 @@ import { DatabaseSync } from "node:sqlite";
 const TIMEZONE = "Asia/Hong_Kong";
 const METRIC_SCOPE = "MCP_MODEL_VISIBLE_PAYLOAD_ESTIMATE";
 const ATTRIBUTION_BASIS = "OWNER_CONFIRMED_EXCLUSIVE_ENDPOINT";
+const RETAINED_DETAIL_DAYS = 90;
+const INTERVAL_SCOPE = "RETAINED_CALLS_ONLY";
+const INTERVALS = Object.freeze({
+  "15m": { milliseconds: 15 * 60_000, maxDays: 7 },
+  "30m": { milliseconds: 30 * 60_000, maxDays: 14 },
+  "1h": { milliseconds: 60 * 60_000, maxDays: 30 },
+  "4h": { milliseconds: 4 * 60 * 60_000, maxDays: 90 },
+});
 const DEFAULT_ESTIMATOR = {
   package: "tiktoken",
   version: "0.14.0",
@@ -27,7 +35,8 @@ export function queryUsageHealth(databasePath, options = {}) {
 
 export function queryUsageOverview(databasePath, options = {}) {
   const range = resolveRange(options);
-  if (!existsSync(databasePath)) return emptyOverview(range, "DATABASE_NOT_CREATED", options.asOfMs);
+  const interval = resolveInterval(options.interval, range);
+  if (!existsSync(databasePath)) return emptyOverview(range, "DATABASE_NOT_CREATED", options.asOfMs, interval);
   return withSnapshot(databasePath, (database) => overviewFromDatabase(database, range, options));
 }
 
@@ -41,13 +50,14 @@ export function queryUsageSnapshot(databasePath, options = {}) {
   const requestedAsOfMs = options.asOfMs ?? options.nowMs ?? Date.now();
   const asOfMs = Math.floor(requestedAsOfMs / 1_000) * 1_000;
   const range = resolveRange({ ...options, nowMs: asOfMs });
+  const interval = resolveInterval(options.interval, range);
   if (!existsSync(databasePath)) {
     return {
       metric_scope: METRIC_SCOPE,
       status: "UNKNOWN",
       as_of: new Date(asOfMs).toISOString(),
       health: unknownHealth("DATABASE_NOT_CREATED", { ...options, asOfMs }),
-      overview: emptyOverview(range, "DATABASE_NOT_CREATED", asOfMs),
+      overview: emptyOverview(range, "DATABASE_NOT_CREATED", asOfMs, interval),
       calls: emptyCalls(range, "DATABASE_NOT_CREATED", asOfMs),
     };
   }
@@ -109,7 +119,11 @@ export function createUsageRequestHandler({ databasePath, pagePath, runtimeHealt
       if (error?.code === "CURSOR_EXPIRED") {
         sendJson(res, 409, { error: "CURSOR_EXPIRED" });
       } else if (error?.code === "INVALID_USAGE_QUERY") {
-        sendJson(res, 400, { error: "invalid_usage_query" });
+        sendJson(res, 400, {
+          error: "invalid_usage_query",
+          ...(error.reason ? { reason: error.reason } : {}),
+          ...(Number.isFinite(error.maxDays) ? { max_days: error.maxDays } : {}),
+        });
       } else {
         sendJson(res, 500, { error: "usage_unavailable" });
       }
@@ -126,6 +140,7 @@ function requestOptions(url, runtimeHealth) {
     limit: parseOptionalInteger(url.searchParams.get("limit")),
     callsLimit: parseOptionalInteger(url.searchParams.get("calls_limit")),
     cursor: url.searchParams.get("cursor") ?? undefined,
+    interval: url.searchParams.get("interval") ?? undefined,
     runtimeHealth,
   };
 }
@@ -215,6 +230,7 @@ function healthFromDatabase(database, options) {
 
 function overviewFromDatabase(database, range, options) {
   const asOfMs = options.asOfMs ?? options.nowMs ?? Date.now();
+  const interval = resolveInterval(options.interval, range);
   const queryRange = withSnapshotBound(range, asOfMs);
   const archiveRange = archivedRange(queryRange, asOfMs);
   const meta = readMeta(database);
@@ -261,7 +277,7 @@ function overviewFromDatabase(database, range, options) {
     applicable_sides: Number(row.calls) * 2 - Number(row.in_progress_calls),
   }));
   const snapshotStatus = fixedAsOfStatus(range, asOfMs, status);
-  return {
+  const output = {
     metric_scope: METRIC_SCOPE,
     status: snapshotStatus,
     as_of: new Date(asOfMs).toISOString(),
@@ -301,6 +317,136 @@ function overviewFromDatabase(database, range, options) {
       "system prompts and conversation history",
       "tool definitions and billing usage",
     ],
+  };
+  if (interval) Object.assign(output, intervalOverview(database, range, interval, meta, boots.gaps, asOfMs));
+  return output;
+}
+
+function intervalOverview(database, range, interval, meta, gaps, asOfMs) {
+  const bounds = intervalBounds(range, interval, asOfMs);
+  const availableFromMs = retainedAvailableFrom(meta, asOfMs);
+  const grouped = intervalRows(database, bounds.queryStartMs, bounds.endMs, interval.milliseconds);
+  const byStart = new Map(grouped.map((row) => [row.bucketStartMs, row]));
+  const buckets = [];
+  for (let startMs = bounds.startMs; startMs < bounds.endMs; startMs += interval.milliseconds) {
+    const endMs = Math.min(startMs + interval.milliseconds, bounds.endMs);
+    const total = byStart.get(startMs) ?? combine([]);
+    const status = intervalBucketStatus({
+      startMs, endMs, asOfMs, availableFromMs, gaps, total,
+      completeEndMs: startMs + interval.milliseconds,
+    });
+    buckets.push({
+      start: new Date(startMs).toISOString(),
+      end: new Date(endMs).toISOString(),
+      status,
+      calls: total.calls,
+      success_calls: total.successCalls,
+      failure_calls: total.failureCalls,
+      estimated_tokens: intervalTokenOutput(total, status),
+    });
+  }
+  return {
+    interval: interval.name,
+    interval_scope: INTERVAL_SCOPE,
+    available_from: Number.isFinite(availableFromMs) ? new Date(availableFromMs).toISOString() : null,
+    by_interval: buckets,
+  };
+}
+
+function intervalRows(database, startMs, endMs, intervalMs) {
+  const rows = database.prepare(`
+    select cast(started_at_ms / ? as integer) * ? as bucket_start_ms,
+      min(local_date) as local_date, min(tool) as tool, estimator_epoch, outcome,
+      request_measurement_status, response_measurement_status,
+      request_token_status, response_token_status, attribution_status,
+      count(*) as calls,
+      sum(request_bytes) as request_bytes, sum(response_bytes) as response_bytes,
+      sum(request_characters) as request_characters, sum(response_characters) as response_characters,
+      sum(request_tokens) as request_tokens, sum(response_tokens) as response_tokens,
+      sum(case when request_bytes is not null then 1 else 0 end) as request_byte_known_calls,
+      sum(case when response_bytes is not null then 1 else 0 end) as response_byte_known_calls,
+      sum(case when request_characters is not null then 1 else 0 end) as request_character_known_calls,
+      sum(case when response_characters is not null then 1 else 0 end) as response_character_known_calls,
+      sum(case when request_tokens is not null then 1 else 0 end) as request_known_calls,
+      sum(case when response_tokens is not null then 1 else 0 end) as response_known_calls
+    from usage_calls
+    where started_at_ms >= ? and started_at_ms < ?
+    group by bucket_start_ms, estimator_epoch, outcome,
+      request_measurement_status, response_measurement_status,
+      request_token_status, response_token_status, attribution_status
+    order by bucket_start_ms
+  `).all(intervalMs, intervalMs, startMs, endMs);
+  const groups = new Map();
+  for (const row of rows) {
+    const bucketStartMs = Number(row.bucket_start_ms);
+    const values = groups.get(bucketStartMs) ?? [];
+    values.push(normalizeAggregate(row));
+    groups.set(bucketStartMs, values);
+  }
+  return Array.from(groups, ([bucketStartMs, values]) => ({
+    bucketStartMs,
+    ...combine(values),
+  }));
+}
+
+function intervalBounds(range, interval, asOfMs) {
+  const retainedStartMs = asOfMs - RETAINED_DETAIL_DAYS * 86_400_000;
+  const requestedStartMs = range.start
+    ? Date.parse(`${range.start}T00:00:00+08:00`)
+    : retainedStartMs;
+  const requestedEndMs = range.end
+    ? Date.parse(`${shiftDate(range.end, 1)}T00:00:00+08:00`)
+    : asOfMs;
+  const queryStartMs = Math.max(requestedStartMs, retainedStartMs);
+  const startMs = Math.floor(queryStartMs / interval.milliseconds)
+    * interval.milliseconds;
+  return { startMs, queryStartMs, endMs: Math.min(requestedEndMs, asOfMs) };
+}
+
+function retainedAvailableFrom(meta, asOfMs) {
+  const coverageStartMs = Number(meta.coverage_started_at_ms);
+  if (!Number.isFinite(coverageStartMs)) return null;
+  return Math.max(coverageStartMs, asOfMs - RETAINED_DETAIL_DAYS * 86_400_000);
+}
+
+function intervalBucketStatus({ startMs, endMs, completeEndMs, asOfMs, availableFromMs, gaps, total }) {
+  if (!Number.isFinite(availableFromMs) || availableFromMs >= endMs) return "UNKNOWN";
+  if (gaps.some((gap) => Number(gap.started_at_ms) <= startMs && Number(gap.ended_at_ms) >= endMs)) {
+    return "UNKNOWN";
+  }
+  const overlapsGap = gaps.some((gap) =>
+    Number(gap.started_at_ms) < endMs && Number(gap.ended_at_ms) > startMs);
+  if (availableFromMs > startMs || overlapsGap || completeEndMs > asOfMs
+    || total.partialCalls > 0 || total.incompleteCalls > 0) {
+    return "PARTIAL";
+  }
+  return "AVAILABLE";
+}
+
+function intervalTokenOutput(total, status) {
+  if (status === "UNKNOWN" || (status === "PARTIAL" && total.calls === 0)) {
+    return {
+      request: null, response: null, total: null,
+      request_known_calls: 0, request_applicable_calls: 0, request_ratio: null,
+      response_known_calls: 0, response_applicable_calls: 0, response_ratio: null,
+      total_calls: total.calls,
+    };
+  }
+  const requestApplicable = total.requestApplicableCalls;
+  const responseApplicable = total.responseApplicableCalls;
+  return {
+    request: total.requestKnownCalls > 0 ? total.requestTokens : (total.calls === 0 ? 0 : null),
+    response: total.responseKnownCalls > 0 ? total.responseTokens : (total.calls === 0 ? 0 : null),
+    total: total.requestKnownCalls + total.responseKnownCalls > 0
+      ? (total.requestTokens ?? 0) + (total.responseTokens ?? 0)
+      : (total.calls === 0 ? 0 : null),
+    request_known_calls: total.requestKnownCalls,
+    request_applicable_calls: requestApplicable,
+    request_ratio: requestApplicable === 0 ? null : total.requestKnownCalls / requestApplicable,
+    response_known_calls: total.responseKnownCalls,
+    response_applicable_calls: responseApplicable,
+    response_ratio: responseApplicable === 0 ? null : total.responseKnownCalls / responseApplicable,
+    total_calls: total.calls,
   };
 }
 
@@ -889,6 +1035,19 @@ function resolveRange(options) {
   throw invalidQuery("unsupported range");
 }
 
+function resolveInterval(value, range) {
+  if (value == null || value === "") return null;
+  const definition = INTERVALS[value];
+  if (!definition) throw invalidQuery("unsupported interval", "unsupported_interval");
+  const requestedDays = range.start && range.end
+    ? daysInclusive(range.start, range.end)
+    : Number.POSITIVE_INFINITY;
+  if (requestedDays > definition.maxDays) {
+    throw invalidQuery("interval range too large", "interval_range_too_large", definition.maxDays);
+  }
+  return { name: value, ...definition };
+}
+
 function dateRange(kind, start, end) {
   return {
     kind,
@@ -1009,9 +1168,9 @@ function unknownHealth(reason, options = {}) {
   };
 }
 
-function emptyOverview(range, reason, asOfMs = Date.now()) {
+function emptyOverview(range, reason, asOfMs = Date.now(), interval = null) {
   const total = combine([]);
-  return {
+  const output = {
     metric_scope: METRIC_SCOPE,
     status: "UNKNOWN",
     reason,
@@ -1034,6 +1193,13 @@ function emptyOverview(range, reason, asOfMs = Date.now()) {
     by_day: [], by_tool: [], by_session: [],
     exclusions: ["W whole-turn context", "model output and reasoning", "system prompts and conversation history", "tool definitions and billing usage"],
   };
+  if (interval) Object.assign(output, {
+    interval: interval.name,
+    interval_scope: INTERVAL_SCOPE,
+    available_from: null,
+    by_interval: [],
+  });
+  return output;
 }
 
 function emptyCalls(range, reason, asOfMs = Date.now()) {
@@ -1078,8 +1244,12 @@ function clampInteger(value, min, max, fallback) {
   return Number.isInteger(numeric) ? Math.min(max, Math.max(min, numeric)) : fallback;
 }
 
-function invalidQuery(message) {
-  return Object.assign(new Error(message), { code: "INVALID_USAGE_QUERY" });
+function invalidQuery(message, reason, maxDays) {
+  return Object.assign(new Error(message), {
+    code: "INVALID_USAGE_QUERY",
+    ...(reason ? { reason } : {}),
+    ...(Number.isFinite(maxDays) ? { maxDays } : {}),
+  });
 }
 
 function sendJson(res, status, body, headers = {}) {

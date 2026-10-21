@@ -58,11 +58,13 @@
 ## API
 
 - `GET /api/usage/health`
-- `GET /api/usage/snapshot?range=today|7d|30d|all|custom&from=YYYY-MM-DD&to=YYYY-MM-DD&calls_limit=50`
-- `GET /api/usage/overview?range=today|7d|30d|all|custom&from=YYYY-MM-DD&to=YYYY-MM-DD`
+- `GET /api/usage/snapshot?range=today|7d|30d|all|custom&from=YYYY-MM-DD&to=YYYY-MM-DD&calls_limit=50&interval=15m|30m|1h|4h`
+- `GET /api/usage/overview?range=today|7d|30d|all|custom&from=YYYY-MM-DD&to=YYYY-MM-DD&interval=15m|30m|1h|4h`
 - `GET /api/usage/calls?range=...&limit=1..100&cursor=<opaque-base64url>`
 
 所有端点只接受 `GET`，为 `Cache-Control: no-store`，且响应固定标记 `metric_scope: "MCP_MODEL_VISIBLE_PAYLOAD_ESTIMATE"`。`by_session` 只覆盖仍保留的 90 天调用明细；长期日聚合不保留会话维度。
+
+`interval` 是可选参数；省略时响应保持原契约。指定后，overview 增加 `interval`、`interval_scope: "RETAINED_CALLS_ONLY"`、`available_from` 和 `by_interval`。周期上限依次为 7、14、30、90 天；超过上限固定返回 `400 interval_range_too_large`，不支持的值固定返回 `400 unsupported_interval`。桶按 `Asia/Hong_Kong` 自然边界对齐，只从 `usage_calls` 明细聚合。连续覆盖内的空桶为精确零；覆盖起点前或完整覆盖缺口为 `UNKNOWN`，部分重叠与未完成当前桶为 `PARTIAL`。
 
 健康面只公开固定故障类别及计数：worker 启动、worker 退出、协议、编码、超时、熔断、积压和关停不完整；不包含异常正文。页面同时显示最后一次 Token 成功时间、队列字节与最老排队年龄。连续失败触发熔断时，已排队项目会快速终结为明确的 `TOKENIZER_CIRCUIT_OPEN`，而不是无提示地保持 `PENDING`。
 

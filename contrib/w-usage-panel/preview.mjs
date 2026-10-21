@@ -41,6 +41,39 @@ const overview = {
   ],
   by_session: [{ session_ref: "w_fixture_session", calls: 2, estimated_tokens: 1870, known_sides: 3, applicable_sides: 4 }],
 };
+overview.interval = "15m";
+overview.interval_scope = "RETAINED_CALLS_ONLY";
+overview.by_interval = previewBuckets("15m");
+overview.available_from = overview.by_interval[0].start;
+
+function previewBuckets(selected) {
+  const intervalMs = { "15m": 900_000, "30m": 1_800_000, "1h": 3_600_000, "4h": 14_400_000 }[selected] ?? 900_000;
+  const intervalEnd = Math.floor(Date.now() / intervalMs) * intervalMs;
+  return Array.from({ length: 12 }, (_, index) => {
+  const start = intervalEnd - (11 - index) * intervalMs;
+  const request = index % 4 === 0 ? 0 : 25 + index * 9;
+  const response = index % 4 === 0 ? 0 : 80 + index * 21;
+  const status = index === 4 ? "UNKNOWN" : index === 8 ? "PARTIAL" : "AVAILABLE";
+  const tokensUnknown = status === "UNKNOWN" || (status === "PARTIAL" && index % 4 === 0);
+  return {
+    start: new Date(start).toISOString(), end: new Date(start + intervalMs).toISOString(), status,
+    calls: status === "UNKNOWN" ? 0 : index % 4 === 0 ? 0 : 1,
+    success_calls: status === "UNKNOWN" || index % 4 === 0 ? 0 : 1, failure_calls: 0,
+    estimated_tokens: {
+      request: tokensUnknown ? null : request,
+      response: tokensUnknown ? null : response,
+      total: tokensUnknown ? null : request + response,
+      request_known_calls: status === "UNKNOWN" || index % 4 === 0 ? 0 : 1,
+      request_applicable_calls: status === "UNKNOWN" || index % 4 === 0 ? 0 : 1,
+      request_ratio: status === "UNKNOWN" || index % 4 === 0 ? null : 1,
+      response_known_calls: status === "UNKNOWN" || index % 4 === 0 ? 0 : 1,
+      response_applicable_calls: status === "UNKNOWN" || index % 4 === 0 ? 0 : 1,
+      response_ratio: status === "UNKNOWN" || index % 4 === 0 ? null : 1,
+      total_calls: status === "UNKNOWN" || index % 4 === 0 ? 0 : 1,
+    },
+  };
+  });
+}
 const health = {
   status: "PARTIAL", total_calls: 3, retained_calls: 3, archived_calls: 0,
   partial_calls: 1, incomplete_calls: 1, dropped_calls: 0,
@@ -62,10 +95,11 @@ const snapshot = {
 };
 
 const server = createServer((request, response) => {
-  const path = new URL(request.url ?? "/", `http://127.0.0.1:${port}`).pathname;
+  const url = new URL(request.url ?? "/", `http://127.0.0.1:${port}`);
+  const path = url.pathname;
   if (path === "/usage") return send(response, 200, "text/html; charset=utf-8", html);
-  if (path === "/api/usage/snapshot") return json(response, snapshot);
-  if (path === "/api/usage/overview") return json(response, overview);
+  if (path === "/api/usage/snapshot") return json(response, { ...snapshot, overview: overviewFor(url) });
+  if (path === "/api/usage/overview") return json(response, overviewFor(url));
   if (path === "/api/usage/health") return json(response, health);
   if (path === "/api/usage/calls") return json(response, calls);
   return send(response, 404, "text/plain; charset=utf-8", "not found");
@@ -73,6 +107,16 @@ const server = createServer((request, response) => {
 server.listen(port, "127.0.0.1", () => process.stdout.write(`preview ready http://127.0.0.1:${port}/usage\n`));
 process.on("SIGINT", () => server.close(() => process.exit(0)));
 process.on("SIGTERM", () => server.close(() => process.exit(0)));
+
+function overviewFor(url) {
+  const selected = url.searchParams.get("interval");
+  if (selected) {
+    const buckets = previewBuckets(selected);
+    return { ...overview, interval: selected, available_from: buckets[0].start, by_interval: buckets };
+  }
+  const { interval: _interval, interval_scope: _scope, available_from: _available, by_interval: _buckets, ...daily } = overview;
+  return daily;
+}
 
 function json(response, value) {
   send(response, 200, "application/json; charset=utf-8", JSON.stringify(value));
