@@ -5,8 +5,8 @@
 - Branch: `codex/w-devspace-usage`.
 - Production-source base: DevSpace v1.0.8 commit
   `fe712e2b6c07231d2a76503bf2a674b165850616`.
-- Monitor implementation CI commit:
-  `805160cd1c2150aed0950501f21a9ef4e17277b0`.
+- Audited monitor implementation commit:
+  `6c6423b3ef926f21869dc5eac3c0946dd45af213`.
 - The dependency lock is byte-for-byte identical to the v1.0.8 base. Both
   copies have Git object id `dd8546fca58df0a0104d7dacd66bd5c9e611d770`.
 - The Pi adapter and its focused tests are also identical to the v1.0.8 base.
@@ -53,7 +53,7 @@ The final local 1,000-pair benchmark added 0.5922 ms at p95, a 3.9419%
 regression against the 15 ms fixture, within the 5% gate.
 
 GitHub Actions run
-[`39517698991`](https://github.com/Yunfeng488/devspace/actions/runs/39517698991)
+[`39530330898`](https://github.com/Yunfeng488/devspace/actions/runs/39530330898)
 passed on `ubuntu-latest`, `windows-latest`, and `macos-15-intel`. On all three
 jobs, Typecheck, Test, Build, Usage runtime release gate, Package dry run,
 Usage monitor performance gate, and Doctor completed successfully. Ubuntu also

@@ -32,7 +32,8 @@ authorized by this document.
 ## Same-source boundary
 
 - Base commit: `fe712e2b6c07231d2a76503bf2a674b165850616`.
-- Implementation CI commit: `805160cd1c2150aed0950501f21a9ef4e17277b0`.
+- Audited monitor implementation commit:
+  `6c6423b3ef926f21869dc5eac3c0946dd45af213`.
 - `package-lock.json`, `src/local-agent-pi.ts`,
   `src/local-agent-pi.test.ts`, and `src/local-agent-pi-sandbox.test.ts` match
   the base exactly.
@@ -43,8 +44,8 @@ authorized by this document.
 ## Cross-platform evidence
 
 GitHub Actions run
-[`39517698991`](https://github.com/Yunfeng488/devspace/actions/runs/39517698991)
-passed on Ubuntu, Windows, and macOS for exact commit `805160c`. Each platform
+[`39530330898`](https://github.com/Yunfeng488/devspace/actions/runs/39530330898)
+passed on Ubuntu, Windows, and macOS for exact commit `6c6423b`. Each platform
 completed Typecheck, Test, Build, runtime/privacy verification, package dry
 run, performance gate, and Doctor. The Ubuntu Test step ran after successful
 Pi sandbox dependency installation; the Linux-only `download_artifact` MCP
